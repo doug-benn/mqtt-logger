@@ -9,7 +9,7 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-func runMQTT(stream chan string) {
+func runMQTT(stream chan mqtt.Message) {
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker("mqtt://mqtt.eclipseprojects.io:1883")
@@ -24,9 +24,10 @@ func runMQTT(stream chan string) {
 	}
 	opts.OnConnect = func(c mqtt.Client) {
 		fmt.Println("MQTT Client Connected")
-		c.SubscribeMultiple(map[string]byte{"temperature": 1, "rainfall": 2}, func(c mqtt.Client, m mqtt.Message) {
+		//"temperature": 1,
+		c.SubscribeMultiple(map[string]byte{"rainfall": 0}, func(c mqtt.Client, m mqtt.Message) {
 			fmt.Printf("Event received: %s from topic:%s\n", m.Payload(), m.Topic())
-			stream <- string(m.Payload())
+			stream <- m
 		})
 
 	}

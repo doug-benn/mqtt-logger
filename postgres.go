@@ -29,14 +29,14 @@ var (
 )
 
 // Database is the Postgres implementation of the database store.
-type postgresDatabase struct {
+type PostgresDatabase struct {
 	startStopMutex sync.Mutex
 	running        bool
 	Sql            *sql.DB
 }
 
 // NewDatabase creates a database connection pool in DB and pings the database.
-func NewDatabase(connLimits bool, idleLimits bool) (*postgresDatabase, error) {
+func NewDatabase(connLimits bool, idleLimits bool) (*PostgresDatabase, error) {
 	connStr := "postgresql://" + username + ":" + password +
 		"@" + host + ":" + port + "/" + database + "?sslmode=disable&connect_timeout=1"
 
@@ -53,7 +53,7 @@ func NewDatabase(connLimits bool, idleLimits bool) (*postgresDatabase, error) {
 		db.SetMaxIdleConns(5)
 	}
 
-	return &postgresDatabase{
+	return &PostgresDatabase{
 		Sql: db,
 	}, nil
 }
@@ -61,7 +61,7 @@ func NewDatabase(connLimits bool, idleLimits bool) (*postgresDatabase, error) {
 // Start pings the database, and if it fails, retries up to 3 times
 // before returning a start error.
 // TODO Remove this and an the logic to the "new service"
-func (db *postgresDatabase) Start(ctx context.Context) (runError <-chan error, err error) {
+func (db *PostgresDatabase) Start(ctx context.Context) (runError <-chan error, err error) {
 	db.startStopMutex.Lock()
 	defer db.startStopMutex.Unlock()
 
@@ -95,7 +95,7 @@ func (db *postgresDatabase) Start(ctx context.Context) (runError <-chan error, e
 }
 
 // Stop stops the database and closes the connection.
-func (db *postgresDatabase) Stop() (err error) {
+func (db *PostgresDatabase) Stop() (err error) {
 	db.startStopMutex.Lock()
 	defer db.startStopMutex.Unlock()
 	if !db.running {
@@ -115,7 +115,7 @@ func (db *postgresDatabase) Stop() (err error) {
 
 // Health checks the health of the database connection by pinging the database.
 // It returns a map with keys indicating various health statistics.
-func (db *postgresDatabase) Health() map[string]string {
+func (db *PostgresDatabase) Health() map[string]string {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
