@@ -2,23 +2,17 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
-	_ "github.com/lib/pq"
 )
-
-//Postgres Docker Command
-//docker run --name postgres -e POSTGRES_PASSWORD=password -e POSTGRES_DB=test_db -p 5432:5432 -d postgres
-
-//TODO Turn the db start/stop into a controller
-//TODO Split out the service
 
 var (
 	host     = os.Getenv("POSTGRES_HOST")
@@ -28,53 +22,43 @@ var (
 	database = os.Getenv("POSTGRES_DB")
 )
 
+var pgOnce sync.Once
+
 // Database is the Postgres implementation of the database store.
 type PostgresDatabase struct {
-	startStopMutex sync.Mutex
-	running        bool
-	Sql            *sql.DB
+	pool    *pgxpool.Pool
+	running bool
 }
 
 // NewDatabase creates a database connection pool in DB and pings the database.
-func NewDatabase(connLimits bool, idleLimits bool) (*PostgresDatabase, error) {
+func NewDatabasePool(ctx context.Context) (*PostgresDatabase, error) {
 	connStr := "postgresql://" + username + ":" + password +
 		"@" + host + ":" + port + "/" + database + "?sslmode=disable&connect_timeout=1"
 
-	db, err := sql.Open("postgres", connStr)
+	config, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
+		slog.Error("Error parsing pool config", slog.String("error", err.Error()))
 		return nil, err
 	}
 
-	if connLimits {
-		db.SetMaxOpenConns(5)
-	}
+	config.MaxConns = 10
+	config.MinConns = 2
+	config.MaxConnLifetime = 30 * time.Minute
+	config.MaxConnIdleTime = 10 * time.Minute
+	config.HealthCheckPeriod = 2 * time.Minute
 
-	if idleLimits {
-		db.SetMaxIdleConns(5)
-	}
+	var pool *pgxpool.Pool
+	pgOnce.Do(func() {
+		pool, err = pgxpool.NewWithConfig(ctx, config)
+	})
 
-	return &PostgresDatabase{
-		Sql: db,
-	}, nil
-}
-
-// Start pings the database, and if it fails, retries up to 3 times
-// before returning a start error.
-// TODO Remove this and an the logic to the "new service"
-func (db *PostgresDatabase) Start(ctx context.Context) (runError <-chan error, err error) {
-	db.startStopMutex.Lock()
-	defer db.startStopMutex.Unlock()
-
-	if db.running {
-		return nil, fmt.Errorf("%s", "database service is already running")
-	}
-
+	// Verify the connection
 	fails := 0
 	const maxFails = 3
 	const sleepDuration = 200 * time.Millisecond
 	var totalTryTime time.Duration
 	for {
-		err = db.Sql.PingContext(ctx)
+		err = pool.Ping(ctx)
 		if err == nil {
 			break
 		} else if ctx.Err() != nil {
@@ -88,26 +72,20 @@ func (db *PostgresDatabase) Start(ctx context.Context) (runError <-chan error, e
 		totalTryTime += sleepDuration
 	}
 
-	db.running = true
-
-	// TODO have periodic ping to check connection is still alive and signal through the run error channel.
-	return nil, nil
+	slog.Info("Successfully connected to database")
+	return &PostgresDatabase{pool: pool}, nil
 }
 
 // Stop stops the database and closes the connection.
 func (db *PostgresDatabase) Stop() (err error) {
-	db.startStopMutex.Lock()
-	defer db.startStopMutex.Unlock()
+
 	if !db.running {
 		fmt.Println("database is not running")
 		return fmt.Errorf("%s", "database is not running")
 	}
 
-	err = db.Sql.Close()
-	if err != nil {
-		fmt.Println("closing database connection")
-		return fmt.Errorf("closing database connection: %w", err)
-	}
+	db.pool.Close()
+	fmt.Println("closing database connection")
 
 	db.running = false
 	return nil
@@ -122,7 +100,7 @@ func (db *PostgresDatabase) Health() map[string]string {
 	stats := make(map[string]string)
 
 	// Ping the database
-	err := db.Sql.PingContext(ctx)
+	err := db.pool.Ping(ctx)
 	if err != nil {
 		stats["status"] = "down"
 		stats["error"] = fmt.Sprintf("db down: %v", err)
@@ -135,7 +113,7 @@ func (db *PostgresDatabase) Health() map[string]string {
 	stats["message"] = "It's healthy"
 
 	// Get database stats (like open connections, in use, idle, etc.)
-	dbStats := db.Sql.Stats()
+	dbStats := db.pool.Stats()
 	stats["open_connections"] = strconv.Itoa(dbStats.OpenConnections)
 	stats["in_use"] = strconv.Itoa(dbStats.InUse)
 	stats["idle"] = strconv.Itoa(dbStats.Idle)
