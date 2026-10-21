@@ -1,4 +1,4 @@
-package main
+package database
 
 import (
 	"context"
@@ -26,12 +26,12 @@ var pgOnce sync.Once
 
 // Database is the Postgres implementation of the database store.
 type PostgresDatabase struct {
-	pool    *pgxpool.Pool
-	running bool
+	Pool    *pgxpool.Pool
+	Running bool
 }
 
 // NewDatabase creates a database connection pool in DB and pings the database.
-func NewDatabasePool(ctx context.Context) (*PostgresDatabase, error) {
+func NewDatabase(ctx context.Context) (*PostgresDatabase, error) {
 	connStr := "postgresql://" + username + ":" + password +
 		"@" + host + ":" + port + "/" + database + "?sslmode=disable&connect_timeout=1"
 
@@ -73,21 +73,21 @@ func NewDatabasePool(ctx context.Context) (*PostgresDatabase, error) {
 	}
 
 	slog.Info("Successfully connected to database")
-	return &PostgresDatabase{pool: pool}, nil
+	return &PostgresDatabase{Pool: pool}, nil
 }
 
 // Stop stops the database and closes the connection.
 func (db *PostgresDatabase) Stop() (err error) {
 
-	if !db.running {
+	if !db.Running {
 		fmt.Println("database is not running")
 		return fmt.Errorf("%s", "database is not running")
 	}
 
-	db.pool.Close()
+	db.Pool.Close()
 	fmt.Println("closing database connection")
 
-	db.running = false
+	db.Running = false
 	return nil
 }
 
@@ -100,7 +100,7 @@ func (db *PostgresDatabase) Health() map[string]string {
 	stats := make(map[string]string)
 
 	// Ping the database
-	err := db.pool.Ping(ctx)
+	err := db.Pool.Ping(ctx)
 	if err != nil {
 		stats["status"] = "down"
 		stats["error"] = fmt.Sprintf("db down: %v", err)
@@ -113,29 +113,29 @@ func (db *PostgresDatabase) Health() map[string]string {
 	stats["message"] = "It's healthy"
 
 	// Get database stats (like open connections, in use, idle, etc.)
-	dbStats := db.pool.Stats()
-	stats["open_connections"] = strconv.Itoa(dbStats.OpenConnections)
-	stats["in_use"] = strconv.Itoa(dbStats.InUse)
-	stats["idle"] = strconv.Itoa(dbStats.Idle)
-	stats["wait_count"] = strconv.FormatInt(dbStats.WaitCount, 10)
-	stats["wait_duration"] = dbStats.WaitDuration.String()
-	stats["max_idle_closed"] = strconv.FormatInt(dbStats.MaxIdleClosed, 10)
-	stats["max_lifetime_closed"] = strconv.FormatInt(dbStats.MaxLifetimeClosed, 10)
+	dbStats := db.Pool.Stat()
+	stats["open_connections"] = strconv.Itoa(int(dbStats.TotalConns()))
+	stats["in_use"] = strconv.Itoa(int(dbStats.AcquiredConns()))
+	stats["idle"] = strconv.Itoa(int(dbStats.IdleConns()))
+	stats["wait_count"] = strconv.FormatInt(dbStats.EmptyAcquireCount(), 10)
+	stats["wait_duration"] = dbStats.EmptyAcquireWaitTime().String()
+	stats["max_idle_closed"] = strconv.FormatInt(dbStats.MaxIdleDestroyCount(), 10)
+	stats["max_lifetime_closed"] = strconv.FormatInt(dbStats.MaxLifetimeDestroyCount(), 10)
 
 	// Evaluate stats to provide a health message
-	if dbStats.OpenConnections > 40 { // Assuming 50 is the max for this example
+	if dbStats.AcquiredConns() > 40 { // Assuming 50 is the max for this example
 		stats["message"] = "The database is experiencing heavy load."
 	}
 
-	if dbStats.WaitCount > 1000 {
+	if dbStats.EmptyAcquireCount() > 1000 {
 		stats["message"] = "The database has a high number of wait events, indicating potential bottlenecks."
 	}
 
-	if dbStats.MaxIdleClosed > int64(dbStats.OpenConnections)/2 {
+	if dbStats.MaxIdleDestroyCount() > int64(dbStats.TotalConns())/2 {
 		stats["message"] = "Many idle connections are being closed, consider revising the connection pool settings."
 	}
 
-	if dbStats.MaxLifetimeClosed > int64(dbStats.OpenConnections)/2 {
+	if dbStats.MaxLifetimeDestroyCount() > int64(dbStats.TotalConns())/2 {
 		stats["message"] = "Many connections are being closed due to max lifetime, consider increasing max lifetime or revising the connection usage pattern."
 	}
 

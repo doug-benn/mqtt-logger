@@ -2,28 +2,29 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
+	"github.com/doug-benn/mqtt-logger/database"
 	"github.com/doug-benn/mqtt-logger/model"
 )
 
 type RainfallRepo struct {
-	db *sql.DB
+	db *database.PostgresDatabase
 }
 
-func NewRainfallRepository(db *sql.DB) RainfallRepository {
+func NewDatabaseService(db *database.PostgresDatabase) databaseService {
 	return &RainfallRepo{
 		db: db,
 	}
 }
 
-type RainfallRepository interface {
+type databaseService interface {
 	Migrate(ctx context.Context) error
 	Create(ctx context.Context, message model.RainfallMessage) (*model.RainfallMessage, error)
 }
 
 func (r *RainfallRepo) Migrate(ctx context.Context) error {
+
 	query := `
 	CREATE TABLE IF NOT EXISTS mqtt_message(
 		id SERIAL PRIMARY KEY,
@@ -32,7 +33,7 @@ func (r *RainfallRepo) Migrate(ctx context.Context) error {
 	);
 	`
 
-	_, err := r.db.ExecContext(ctx, query)
+	_, err := r.db.Pool.Exec(ctx, query)
 	return err
 }
 

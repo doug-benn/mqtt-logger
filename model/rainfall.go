@@ -8,8 +8,7 @@ import (
 )
 
 type RainfallMessage struct {
-	MessageType string
-	Rainfall    float64 `json:"rainfall"`
+	Rainfall float64 `json:"rainfall"`
 }
 
 func ParseRainfallMessage(msg mqtt.Message) RainfallMessage {
