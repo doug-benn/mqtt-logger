@@ -1,0 +1,9 @@
+FROM golang:1.27-alpine AS build
+ARG GOOSE_VERSION=v3.29.0
+RUN go install github.com/pressly/goose/v3/cmd/goose@${GOOSE_VERSION}
+
+FROM alpine:3.22
+COPY --from=build /go/bin/goose /usr/local/bin/goose
+COPY migrations/ /migrations/
+WORKDIR /migrations
+ENTRYPOINT ["goose"]
