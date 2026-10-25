@@ -33,7 +33,7 @@ func (r *RainfallRepo) Migrate(ctx context.Context) error {
 	);
 	`
 
-	_, err := r.db.Pool.Exec(ctx, query)
+	_, err := r.db.Pool().Exec(ctx, query)
 	return err
 }
 

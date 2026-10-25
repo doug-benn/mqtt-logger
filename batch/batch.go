@@ -41,7 +41,6 @@ func (bp *BatchProcessor[T]) Add(ctx context.Context, item T) error {
 	case bp.input <- item:
 		return nil
 	case <-ctx.Done():
-		fmt.Println("batch")
 		return ctx.Err()
 	case <-bp.done:
 		return fmt.Errorf("batch processor is closed")
@@ -55,17 +54,16 @@ func (bp *BatchProcessor[T]) run() {
 	timer := time.NewTimer(bp.timeout)
 	timer.Stop() // Stop initially
 
+	flush := func() {
+		if len(batch) > 0 {
+			bp.processBatch(batch)
+			batch = batch[:0]
+		}
+	}
+
 	for {
 		select {
-		case item, ok := <-bp.input:
-			if !ok {
-				// Channel closed, flush and exit
-				if len(batch) > 0 {
-					bp.processBatch(batch)
-				}
-				return
-			}
-
+		case item := <-bp.input:
 			batch = append(batch, item)
 
 			// Start timer if this is the first item
@@ -76,23 +74,24 @@ func (bp *BatchProcessor[T]) run() {
 			// Check if batch is full
 			if len(batch) >= bp.maxSize {
 				timer.Stop()
-				bp.processBatch(batch)
-				batch = batch[:0] // Reset slice
+				flush()
 			}
 
 		case <-timer.C:
 			// Timeout occurred, flush current batch
-			if len(batch) > 0 {
-				bp.processBatch(batch)
-				batch = batch[:0] // Reset slice
-			}
+			flush()
 
 		case <-bp.done:
-			// Flush remaining items and exit
-			if len(batch) > 0 {
-				bp.processBatch(batch)
+			// Drain items Add() accepted before shutdown so they flush too
+			for {
+				select {
+				case item := <-bp.input:
+					batch = append(batch, item)
+				default:
+					flush()
+					return
+				}
 			}
-			return
 		}
 	}
 }
@@ -102,7 +101,11 @@ func (bp *BatchProcessor[T]) processBatch(batch []T) {
 	batchCopy := make([]T, len(batch))
 	copy(batchCopy, batch)
 
+	// Add before starting: run() still holds a wg count here, so Close's Wait
+	// can't observe zero and return while this batch is still in flight
+	bp.wg.Add(1)
 	go func() {
+		defer bp.wg.Done()
 		if err := bp.processor(batchCopy); err != nil {
 			fmt.Printf("Error processing batch: %v\n", err)
 		}
@@ -114,8 +117,8 @@ func (bp *BatchProcessor[T]) Close() error {
 		return nil // Already closed
 	}
 
+	// input stays open: closing it races with in-flight Add sends and panics them
 	close(bp.done)
-	close(bp.input)
 	bp.wg.Wait()
 	return nil
 }

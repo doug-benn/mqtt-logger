@@ -70,4 +70,9 @@ func runMQTT() {
 
 	// Stop the pool and wait for all submitted tasks to complete
 	pool.StopAndWait()
+
+	// Flush the last partial batch; without this, queued readings are dropped
+	if err := tempBatch.Close(); err != nil {
+		fmt.Println("Error closing batch processor:", err)
+	}
 }
