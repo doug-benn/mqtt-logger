@@ -1,0 +1,12 @@
+version: "3"
+
+tasks:
+  generate:
+    desc: Regenerate sqlc code
+    # Pinned to a main commit: the output_models_* options that emit table
+    # models into a separate shared package (sqlc-dev/sqlc#4421) have not
+    # shipped in a release yet.
+    vars:
+      SQLC_COMMIT: 3ad8b20fb02b5bea81591b673da0758b8685d951
+    cmds:
+      - go run "github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_COMMIT}}" generate

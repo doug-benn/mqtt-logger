@@ -1,0 +1,18 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: database/sql/queries
+    gen:
+      go:
+        package: queries
+        out: database/queries
+        sql_package: pgx/v5
+        output_models_path: model
+        output_models_package: model
+        output_models_import: github.com/doug-benn/mqtt-logger/model
+        # pgx/v5 maps timestamptz to pgtype.Timestamptz by default, which would
+        # leak a pgx type into the shared, database-agnostic model package
+        overrides:
+          - db_type: timestamptz
+            go_type: time.Time
