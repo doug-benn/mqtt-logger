@@ -10,10 +10,12 @@ import (
 	"github.com/alitto/pond/v2"
 	"github.com/doug-benn/mqtt-logger/batch"
 	"github.com/doug-benn/mqtt-logger/model"
+	"github.com/doug-benn/mqtt-logger/repository"
+	"github.com/doug-benn/mqtt-logger/utilities"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-func runMQTT() {
+func runMQTT(rainfallRepo repository.RainfallRepo) {
 	pool := pond.NewPool(100)
 
 	tempBatch := batch.NewBatchProcessor(10, 60*time.Second, func(batch []model.TemperatureMessage) error {
@@ -26,8 +28,8 @@ func runMQTT() {
 	})
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("mqtt://test.mosquitto.org:1883")
-	opts.SetClientID("go_mqtt_client")
+	opts.AddBroker(utilities.GetEnvOrDefault("MQTT_BROKER", "mqtt://broker.connectmq.com:1883"))
+	opts.SetClientID(utilities.GetEnvOrDefault("MQTT_CLIENT_ID", "go_mqtt_client"))
 	opts.AutoReconnect = true
 	opts.OnConnectionLost = func(c mqtt.Client, err error) {
 		fmt.Println("Connection Lost:", err)
@@ -39,13 +41,14 @@ func runMQTT() {
 	opts.OnConnect = func(c mqtt.Client) {
 		fmt.Println("MQTT Client Connected")
 		//"temperature": 1,
-		c.SubscribeMultiple(map[string]byte{"temperature": 0}, func(c mqtt.Client, m mqtt.Message) {
+		if token := c.SubscribeMultiple(map[string]byte{"temperature": 0, "rainfall": 0}, func(c mqtt.Client, m mqtt.Message) {
 			fmt.Printf("Event received: %s from topic:%s\n", m.Payload(), m.Topic())
 			pool.Submit(func() {
-				processMQTT(m, tempBatch)
+				processMQTT(m, tempBatch, rainfallRepo)
 			})
-		})
-
+		}); token.Wait() && token.Error() != nil {
+			fmt.Println("Subscription failed:", token.Error())
+		}
 	}
 
 	opts.DefaultPublishHandler = func(c mqtt.Client, m mqtt.Message) {

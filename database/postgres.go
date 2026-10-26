@@ -37,7 +37,7 @@ type PostgresConfig struct {
 func DefaultConfig() PostgresConfig {
 	port, err := strconv.Atoi(utilities.GetEnvOrDefault("POSTGRES_PORT", "5435"))
 	if err != nil {
-		port = 5432
+		port = 5435
 	}
 
 	return PostgresConfig{

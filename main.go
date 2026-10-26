@@ -1,18 +1,23 @@
 package main
 
+import (
+	"context"
+	"log/slog"
+	"os"
+
+	"github.com/doug-benn/mqtt-logger/database"
+	"github.com/doug-benn/mqtt-logger/repository/postgres"
+)
+
 func main() {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	//ctx, cancel := context.WithCancel(context.Background())
-	//defer cancel()
-	// db, err := database.NewDatabase(ctx)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// defer db.Stop()
-	//rainfallRepo := repository.NewDatabaseService(db)
-	// fmt.Println(rainfallRepo)
-	// rainfallRepo.Migrate(ctx)
+	db, err := database.NewDatabase(context.Background(), logger, database.DefaultConfig())
+	if err != nil {
+		logger.Error("database unavailable", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
 
-	runMQTT()
-
+	runMQTT(postgres.NewRainfallRepo(db.Pool()))
 }

@@ -11,11 +11,17 @@ type RainfallMessage struct {
 	Rainfall float64 `json:"rainfall"`
 }
 
-func ParseRainfallMessage(msg mqtt.Message) RainfallMessage {
-	var rainfallMessage RainfallMessage
-	err := json.Unmarshal(msg.Payload(), &rainfallMessage)
-	if err != nil {
-		fmt.Println(err)
+// ParseRainfallMessage rejects payloads that are not JSON or that carry no
+// numeric rainfall field, so a bad payload can never surface as a zero reading.
+func ParseRainfallMessage(msg mqtt.Message) (RainfallMessage, error) {
+	var payload struct {
+		Rainfall *float64 `json:"rainfall"`
 	}
-	return rainfallMessage
+	if err := json.Unmarshal(msg.Payload(), &payload); err != nil {
+		return RainfallMessage{}, fmt.Errorf("decoding rainfall payload: %w", err)
+	}
+	if payload.Rainfall == nil {
+		return RainfallMessage{}, fmt.Errorf("payload has no rainfall field")
+	}
+	return RainfallMessage{Rainfall: *payload.Rainfall}, nil
 }
