@@ -1,4 +1,11 @@
 services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
   postgres:
     image: postgres:18-alpine
     environment:

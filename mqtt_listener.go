@@ -30,7 +30,7 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 	})
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker(utilities.GetEnvOrDefault("MQTT_BROKER", "mqtt://broker.connectmq.com:1883"))
+	opts.AddBroker(utilities.GetEnvOrDefault("MQTT_BROKER", "mqtt://localhost:1883"))
 	opts.SetClientID(utilities.GetEnvOrDefault("MQTT_CLIENT_ID", "go_mqtt_client"))
 	opts.AutoReconnect = true
 	opts.OnConnectionLost = func(c mqtt.Client, err error) {

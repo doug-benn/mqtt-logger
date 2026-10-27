@@ -34,6 +34,20 @@ tasks:
     desc: Run the MQTT logger against the dev stack
     cmd: go run .
 
+  watch:
+    desc: Run the MQTT logger, restarting on .go changes
+    cmd: wgo -file=.go -exit go run .
+
+  dev:
+    desc: Run the logger and the message publisher together (logger restarts on .go changes)
+    deps:
+      - watch
+      - publish
+
+  publish:
+    desc: Publish a rainfall and temperature message once per second
+    cmd: uv run scripts/publish_messages.py
+
   check:
     desc: gofmt check, go vet, build
     cmds:
