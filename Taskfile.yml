@@ -1,5 +1,8 @@
 version: "3"
 
+vars:
+  DSN: postgresql://postgres:postgres@postgres:5432/testdb?sslmode=disable
+
 tasks:
   generate:
     desc: Regenerate sqlc code
@@ -10,3 +13,34 @@ tasks:
       SQLC_COMMIT: 3ad8b20fb02b5bea81591b673da0758b8685d951
     cmds:
       - go run "github.com/sqlc-dev/sqlc/cmd/sqlc@{{.SQLC_COMMIT}}" generate
+
+  up:
+    desc: Start Postgres and apply migrations
+    cmd: docker compose up -d --build
+
+  down:
+    desc: Stop the dev stack, keep database data
+    cmd: docker compose down
+
+  reset:
+    desc: Stop the dev stack and delete database data
+    cmd: docker compose down -v
+
+  migrate-status:
+    desc: Show goose migration status
+    cmd: docker compose run --rm migrate -dir /migrations postgres {{.DSN}} status
+
+  run:
+    desc: Run the MQTT logger against the dev stack
+    cmd: go run .
+
+  check:
+    desc: gofmt check, go vet, build
+    cmds:
+      - files="$(gofmt -l .)"; if [ -n "$files" ]; then echo "$files"; exit 1; fi
+      - go vet ./...
+      - go build ./...
+
+  test:
+    desc: Run all tests with the race detector
+    cmd: go test -race ./...

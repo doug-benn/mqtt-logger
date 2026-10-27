@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/alitto/pond/v2"
 	"github.com/doug-benn/mqtt-logger/batch"
+	"github.com/doug-benn/mqtt-logger/handlers"
 	"github.com/doug-benn/mqtt-logger/model"
 	"github.com/doug-benn/mqtt-logger/repository"
 	"github.com/doug-benn/mqtt-logger/utilities"
@@ -40,22 +42,31 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 	}
 	opts.OnConnect = func(c mqtt.Client) {
 		fmt.Println("MQTT Client Connected")
-		//"temperature": 1,
-		if token := c.SubscribeMultiple(map[string]byte{"temperature": 0, "rainfall": 0}, func(c mqtt.Client, m mqtt.Message) {
-			fmt.Printf("Event received: %s from topic:%s\n", m.Payload(), m.Topic())
-			pool.Submit(func() {
-				processMQTT(m, tempBatch, rainfallRepo)
-			})
-		}); token.Wait() && token.Error() != nil {
+		// The topic routes registered below carry the handlers; this
+		// subscription only tells the broker what to send.
+		if token := c.SubscribeMultiple(map[string]byte{"temperature": 0, "rainfall": 0}, nil); token.Wait() && token.Error() != nil {
 			fmt.Println("Subscription failed:", token.Error())
 		}
 	}
 
 	opts.DefaultPublishHandler = func(c mqtt.Client, m mqtt.Message) {
-		fmt.Printf("Received message: %s from topic: %s\n", m.Payload(), m.Topic())
+		fmt.Printf("Dropping message from unhandled topic %s: %s\n", m.Topic(), m.Payload())
 	}
 
 	client := mqtt.NewClient(opts)
+
+	// paho dispatches topic routes through its own router; every message is
+	// processed on the pool so callbacks stay non-blocking and a slow DB
+	// write never stalls intake.
+	addRoute := func(topic string, handler handlers.Handler[mqtt.Message]) {
+		client.AddRoute(topic, func(c mqtt.Client, m mqtt.Message) {
+			pool.Submit(func() {
+				handler(context.Background(), m)
+			})
+		})
+	}
+	addRoute("rainfall", handlers.RainfallHandler(rainfallRepo))
+	addRoute("temperature", handlers.TemperatureHandler(tempBatch))
 
 	fmt.Println("Connecting to MQTT Broker...")
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
