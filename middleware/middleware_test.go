@@ -9,6 +9,13 @@ import (
 
 type fakeMessage struct{ payload string }
 
+// passRecorder counts messages that reached the handler behind a stage.
+type passRecorder struct{ passed []int }
+
+func (r *passRecorder) handler() handlers.Handler[int] {
+	return func(ctx context.Context, msg int) { r.passed = append(r.passed, msg) }
+}
+
 func TestChainFirstMiddlewareRunsOutermost(t *testing.T) {
 	var log []string
 	record := func(name string) Middleware[fakeMessage] {
