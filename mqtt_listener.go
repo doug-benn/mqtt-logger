@@ -11,6 +11,7 @@ import (
 	"github.com/alitto/pond/v2"
 	"github.com/doug-benn/mqtt-logger/batch"
 	"github.com/doug-benn/mqtt-logger/handlers"
+	"github.com/doug-benn/mqtt-logger/middleware"
 	"github.com/doug-benn/mqtt-logger/model"
 	"github.com/doug-benn/mqtt-logger/repository"
 	"github.com/doug-benn/mqtt-logger/utilities"
@@ -29,6 +30,11 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 		return nil
 	})
 
+	// The route set is the wiring point: each topic declares its composed
+	// handler, and the broker subscription derives from it — adding a topic
+	// is one entry here.
+	routes := buildRoutes(rainfallRepo, tempBatch)
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(utilities.GetEnvOrDefault("MQTT_BROKER", "mqtt://localhost:1883"))
 	opts.SetClientID(utilities.GetEnvOrDefault("MQTT_CLIENT_ID", "go_mqtt_client"))
@@ -42,9 +48,9 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 	}
 	opts.OnConnect = func(c mqtt.Client) {
 		fmt.Println("MQTT Client Connected")
-		// The topic routes registered below carry the handlers; this
-		// subscription only tells the broker what to send.
-		if token := c.SubscribeMultiple(map[string]byte{"temperature": 0, "rainfall": 0}, nil); token.Wait() && token.Error() != nil {
+		// The routes carry the handlers; this subscription only tells the
+		// broker what to send.
+		if token := c.SubscribeMultiple(subscribeTopics(routes), nil); token.Wait() && token.Error() != nil {
 			fmt.Println("Subscription failed:", token.Error())
 		}
 	}
@@ -57,10 +63,10 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 
 	// paho dispatches topic routes through its own router; every message is
 	// processed on the pool so callbacks stay non-blocking and a slow DB
-	// write never stalls intake. This closure is the only place the MQTT
+	// write never stalls intake. This loop is the only place the MQTT
 	// library feeds a handler chain: everything a chain sees is the raw
 	// message built here.
-	addRoute := func(topic string, handler handlers.Handler[handlers.RawMessage]) {
+	for topic, handler := range routes {
 		client.AddRoute(topic, func(c mqtt.Client, m mqtt.Message) {
 			msg := handlers.RawMessage{Topic: m.Topic(), Payload: m.Payload()}
 			pool.Submit(func() {
@@ -68,8 +74,6 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 			})
 		})
 	}
-	addRoute("rainfall", handlers.RainfallHandler(rainfallRepo))
-	addRoute("temperature", handlers.TemperatureHandler(tempBatch))
 
 	fmt.Println("Connecting to MQTT Broker...")
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
@@ -92,4 +96,30 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 	if err := tempBatch.Close(); err != nil {
 		fmt.Println("Error closing batch processor:", err)
 	}
+}
+
+// buildRoutes composes each topic's chain: its handler wrapped in that
+// topic's middleware stages, first stage outermost. Policy is declared
+// inline per topic, so one entry shows a topic's whole pipeline.
+func buildRoutes(rainfallRepo repository.RainfallRepo, tempBatch *batch.BatchProcessor[model.TemperatureMessage]) map[string]handlers.Handler[handlers.RawMessage] {
+	return map[string]handlers.Handler[handlers.RawMessage]{
+		"rainfall": middleware.Chain(
+			handlers.RainfallHandler(rainfallRepo),
+			middleware.SizeCap(middleware.SizeCapDefault),
+		),
+		"temperature": middleware.Chain(
+			handlers.TemperatureHandler(tempBatch),
+			middleware.SizeCap(middleware.SizeCapDefault),
+		),
+	}
+}
+
+// subscribeTopics is the broker subscription for a route set: exactly the
+// topics the logger handles, all at QoS 0.
+func subscribeTopics(routes map[string]handlers.Handler[handlers.RawMessage]) map[string]byte {
+	topics := make(map[string]byte, len(routes))
+	for topic := range routes {
+		topics[topic] = 0
+	}
+	return topics
 }
