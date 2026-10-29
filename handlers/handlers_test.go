@@ -55,7 +55,7 @@ func TestRainfallHandlerDropsOnDatabaseError(t *testing.T) {
 	handler(context.Background(), RawMessage{Topic: "rainfall", Payload: []byte(`{"rainfall": 2}`)})
 }
 
-func TestTemperatureHandlerLegacyBehavior(t *testing.T) {
+func TestTemperatureHandlerDropsMalformed(t *testing.T) {
 	var got []model.TemperatureMessage
 	tempBatch := batch.NewBatchProcessor(10, time.Hour, func(items []model.TemperatureMessage) error {
 		got = append(got, items...)
@@ -64,21 +64,18 @@ func TestTemperatureHandlerLegacyBehavior(t *testing.T) {
 	handler := TemperatureHandler(tempBatch)
 
 	handler(context.Background(), RawMessage{Topic: "temperature", Payload: []byte("23.5")})
-	// Legacy decode is preserved byte-for-byte: a malformed payload still
-	// queues a zero-value reading rather than being dropped.
+	// A malformed payload is dropped in the handler rather than decoded to a
+	// zero-value reading — matching the Rainfall handler's semantics.
 	handler(context.Background(), RawMessage{Topic: "temperature", Payload: []byte("not-a-number")})
 
 	if err := tempBatch.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("batched = %v, want two readings", got)
+	if len(got) != 1 {
+		t.Fatalf("batched = %v, want only the valid reading", got)
 	}
 	if got[0].Temperature != 23.5 {
-		t.Errorf("first reading = %v, want 23.5", got[0].Temperature)
-	}
-	if got[1].Temperature != 0 {
-		t.Errorf("legacy malformed reading = %v, want zero-fill", got[1].Temperature)
+		t.Errorf("reading = %v, want 23.5", got[0].Temperature)
 	}
 }

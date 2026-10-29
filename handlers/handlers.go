@@ -26,11 +26,15 @@ func RainfallHandler(rainfallRepo repository.RainfallRepo) Handler[RawMessage] {
 }
 
 // TemperatureHandler is the temperature handler: decode, then queue
-// for batching. Its decode behavior is legacy and kept as-is — the parser
-// logs its own errors and zero-fills.
+// for batching. Malformed payloads are logged and dropped, mirroring
+// the Rainfall handler.
 func TemperatureHandler(tempBatch *batch.BatchProcessor[model.TemperatureMessage]) Handler[RawMessage] {
 	return func(ctx context.Context, msg RawMessage) {
-		processedMessage := model.ParseTemperatureMessage(msg.Payload)
+		processedMessage, err := model.ParseTemperatureMessage(msg.Payload)
+		if err != nil {
+			fmt.Printf("Dropping malformed temperature payload from %s: %v\n", msg.Topic, err)
+			return
+		}
 		fmt.Printf("Message Processed: %+v\n", processedMessage)
 		tempBatch.Add(ctx, processedMessage)
 	}
