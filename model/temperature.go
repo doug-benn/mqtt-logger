@@ -3,18 +3,16 @@ package model
 import (
 	"fmt"
 	"strconv"
-
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 type TemperatureMessage struct {
 	Temperature float64 `json:"temperature"`
 }
 
-func ParseTemperatureMessage(msg mqtt.Message) TemperatureMessage {
+func ParseTemperatureMessage(payload []byte) TemperatureMessage {
 	var temperatureMessage TemperatureMessage
 
-	temp, err := strconv.ParseFloat(string(msg.Payload()), 64)
+	temp, err := strconv.ParseFloat(string(payload), 64)
 	if err != nil {
 		fmt.Println("Error:", err)
 	}

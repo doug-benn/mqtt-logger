@@ -57,11 +57,14 @@ func runMQTT(rainfallRepo repository.RainfallRepo) {
 
 	// paho dispatches topic routes through its own router; every message is
 	// processed on the pool so callbacks stay non-blocking and a slow DB
-	// write never stalls intake.
-	addRoute := func(topic string, handler handlers.Handler[mqtt.Message]) {
+	// write never stalls intake. This closure is the only place the MQTT
+	// library feeds a handler chain: everything a chain sees is the raw
+	// message built here.
+	addRoute := func(topic string, handler handlers.Handler[handlers.RawMessage]) {
 		client.AddRoute(topic, func(c mqtt.Client, m mqtt.Message) {
+			msg := handlers.RawMessage{Topic: m.Topic(), Payload: m.Payload()}
 			pool.Submit(func() {
-				handler(context.Background(), m)
+				handler(context.Background(), msg)
 			})
 		})
 	}

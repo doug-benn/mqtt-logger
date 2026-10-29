@@ -4,16 +4,6 @@ import (
 	"testing"
 )
 
-type fakeMessage struct{ payload []byte }
-
-func (f fakeMessage) Duplicate() bool   { return false }
-func (f fakeMessage) Qos() byte         { return 0 }
-func (f fakeMessage) Retained() bool    { return false }
-func (f fakeMessage) Topic() string     { return "rainfall" }
-func (f fakeMessage) Payload() []byte   { return f.payload }
-func (f fakeMessage) Ack()              {}
-func (f fakeMessage) MessageID() uint16 { return 0 }
-
 func TestParseRainfallMessage(t *testing.T) {
 	valid := []struct {
 		payload string
@@ -23,7 +13,7 @@ func TestParseRainfallMessage(t *testing.T) {
 		{`{"rainfall": 0}`, 0},
 	}
 	for _, tc := range valid {
-		got, err := ParseRainfallMessage(fakeMessage{payload: []byte(tc.payload)})
+		got, err := ParseRainfallMessage([]byte(tc.payload))
 		if err != nil {
 			t.Errorf("ParseRainfallMessage(%s) error: %v", tc.payload, err)
 			continue
@@ -41,7 +31,7 @@ func TestParseRainfallMessage(t *testing.T) {
 		`{"rainfall": "high"}`,
 	}
 	for _, payload := range invalid {
-		if got, err := ParseRainfallMessage(fakeMessage{payload: []byte(payload)}); err == nil {
+		if got, err := ParseRainfallMessage([]byte(payload)); err == nil {
 			t.Errorf("ParseRainfallMessage(%s) = %+v, want error", payload, got)
 		}
 	}
