@@ -2,13 +2,16 @@ package middleware
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/doug-benn/mqtt-logger/handlers"
 )
 
 func TestSizeCapDropsOversized(t *testing.T) {
-	sizeCap := SizeCap(SizeCapDefault)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	sizeCap := SizeCap(logger, SizeCapDefault)
 
 	var passed int
 	handler := sizeCap(func(ctx context.Context, msg handlers.RawMessage) { passed++ })

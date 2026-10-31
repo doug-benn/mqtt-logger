@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/doug-benn/mqtt-logger/handlers"
 )
@@ -15,12 +16,12 @@ const SizeCapDefault = 1024
 // operates at the raw-message stage, so it sees the raw carrier rather than
 // a decoded reading. Over-cap drops are logged: they are the drop a site
 // operator can actually act on.
-func SizeCap(maxBytes int) Middleware[handlers.RawMessage] {
+func SizeCap(logger *slog.Logger, maxBytes int) Middleware[handlers.RawMessage] {
 	return func(next handlers.Handler[handlers.RawMessage]) handlers.Handler[handlers.RawMessage] {
 		return func(ctx context.Context, msg handlers.RawMessage) {
 			if len(msg.Payload) > maxBytes {
-				fmt.Printf("Dropping oversized message from %s: %d bytes > cap %d\n",
-					msg.Topic, len(msg.Payload), maxBytes)
+				logger.Warn(fmt.Sprintf("dropping oversized message: %d bytes > cap %d",
+					len(msg.Payload), maxBytes), "topic", msg.Topic)
 				return
 			}
 			next(ctx, msg)

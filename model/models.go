@@ -8,7 +8,19 @@ import (
 	"time"
 )
 
+type Humidity struct {
+	ID         int64
+	Value      float64
+	ReceivedAt time.Time
+}
+
 type Rainfall struct {
+	ID         int64
+	Value      float64
+	ReceivedAt time.Time
+}
+
+type Temperature struct {
 	ID         int64
 	Value      float64
 	ReceivedAt time.Time

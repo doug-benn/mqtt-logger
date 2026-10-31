@@ -19,5 +19,5 @@ func main() {
 	}
 	defer db.Close()
 
-	runMQTT(postgres.NewRainfallRepo(db.Pool()))
+	runMQTT(postgres.NewStore(db.Pool()), logger)
 }

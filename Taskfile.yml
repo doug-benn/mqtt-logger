@@ -45,7 +45,7 @@ tasks:
       - publish
 
   publish:
-    desc: Publish a rainfall and temperature message once per second
+    desc: Publish rainfall, temperature, and humidity messages once per second
     cmd: uv run scripts/publish_messages.py
 
   check:

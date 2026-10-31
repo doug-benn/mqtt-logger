@@ -3,52 +3,61 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"testing"
-	"time"
 
-	"github.com/doug-benn/mqtt-logger/batch"
 	"github.com/doug-benn/mqtt-logger/handlers"
 	"github.com/doug-benn/mqtt-logger/middleware"
 	"github.com/doug-benn/mqtt-logger/model"
+	"github.com/doug-benn/mqtt-logger/repository"
 )
 
-type fakeRainfallRepo struct {
-	created []float64
+// fakeStore is a partial fake: the embedded nil Store satisfies every method
+// the seam has today, and an un-overridden call panics only if a test actually
+// exercises it — so the fake stops growing whenever a message adds a method.
+type fakeStore struct {
+	repository.Store
+	created  []float64
+	tempRows []model.Temperature
+	humRows  []model.Humidity
 }
 
-func (f *fakeRainfallRepo) Create(ctx context.Context, value float64) (model.Rainfall, error) {
+func (f *fakeStore) CreateRainfall(ctx context.Context, value float64) (model.Rainfall, error) {
 	f.created = append(f.created, value)
 	return model.Rainfall{Value: value}, nil
 }
 
-func (f *fakeRainfallRepo) List(ctx context.Context) ([]model.Rainfall, error) {
-	return nil, nil
+func (f *fakeStore) CreateTemperatureBatch(ctx context.Context, batch []model.Temperature) error {
+	f.tempRows = append(f.tempRows, batch...)
+	return nil
 }
 
-// routesFixture builds the route set with test doubles in place of the real
-// dependencies, so tests cross the composed chains exactly as runMQTT wires
-// them. The returned flush closes the temperature batch, flushing queued
-// readings into temps before assertions run.
-func routesFixture(t *testing.T) (routes map[string]handlers.Handler[handlers.RawMessage], repo *fakeRainfallRepo, temps *[]model.TemperatureMessage, flush func()) {
+func (f *fakeStore) CreateHumidities(ctx context.Context, batch []model.Humidity) error {
+	f.humRows = append(f.humRows, batch...)
+	return nil
+}
+
+// discardLogger silences logging in wiring tests: they assert behavior, not
+// log output.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// routesFixture builds the route set with a test double in place of the
+// store, so tests cross the composed chains exactly as runMQTT wires them.
+// The returned flush closes every buffering chain, flushing queued readings
+// into the store's recorded rows before assertions run.
+func routesFixture(t *testing.T) (routes map[string]handlers.Handler[handlers.RawMessage], repo *fakeStore, flush func()) {
 	t.Helper()
 
-	repo = &fakeRainfallRepo{}
-	var captured []model.TemperatureMessage
-	tempBatch := batch.NewBatchProcessor(10, time.Hour, func(items []model.TemperatureMessage) error {
-		captured = append(captured, items...)
-		return nil
-	})
-	temps = &captured
-
-	return buildRoutes(repo, tempBatch), repo, temps, func() {
-		if err := tempBatch.Close(); err != nil {
-			t.Errorf("Close: %v", err)
-		}
-	}
+	repo = &fakeStore{}
+	routes, closeBuffers := buildRoutes(repo, discardLogger())
+	return routes, repo, closeBuffers
 }
 
 func TestSubscribeTopicsDerivesFromRoutes(t *testing.T) {
-	routes, _, _, _ := routesFixture(t)
+	routes, _, _ := routesFixture(t)
 
 	topics := subscribeTopics(routes)
 
@@ -63,7 +72,7 @@ func TestSubscribeTopicsDerivesFromRoutes(t *testing.T) {
 }
 
 func TestRouteChainPersistsRainfall(t *testing.T) {
-	routes, repo, _, _ := routesFixture(t)
+	routes, repo, _ := routesFixture(t)
 
 	routes["rainfall"](context.Background(), handlers.RawMessage{
 		Topic:   "rainfall",
@@ -76,7 +85,7 @@ func TestRouteChainPersistsRainfall(t *testing.T) {
 }
 
 func TestRouteChainDropsOversizedBeforeHandler(t *testing.T) {
-	routes, repo, _, _ := routesFixture(t)
+	routes, repo, _ := routesFixture(t)
 
 	// Not valid JSON either, but SizeCap runs outermost and must drop it
 	// before the handler ever decodes.
@@ -91,17 +100,55 @@ func TestRouteChainDropsOversizedBeforeHandler(t *testing.T) {
 	}
 }
 
-func TestRouteChainQueuesOnlyValidTemperature(t *testing.T) {
-	routes, _, temps, flush := routesFixture(t)
+func TestRouteChainFlushesOnlyValidTemperature(t *testing.T) {
+	routes, repo, flush := routesFixture(t)
 
 	routes["temperature"](context.Background(), handlers.RawMessage{Topic: "temperature", Payload: []byte("21.5")})
 	routes["temperature"](context.Background(), handlers.RawMessage{Topic: "temperature", Payload: []byte("garbage")})
 	flush()
 
-	if len(*temps) != 1 {
-		t.Fatalf("queued = %v, want only the valid reading", *temps)
+	if len(repo.tempRows) != 1 {
+		t.Fatalf("flushed rows = %v, want only the valid reading", repo.tempRows)
 	}
-	if (*temps)[0].Temperature != 21.5 {
-		t.Errorf("queued = %v, want 21.5", (*temps)[0].Temperature)
+	if repo.tempRows[0].Value != 21.5 {
+		t.Errorf("flushed value = %v, want 21.5", repo.tempRows[0].Value)
+	}
+	if repo.tempRows[0].ReceivedAt.IsZero() {
+		t.Error("flushed ReceivedAt is zero; decode must stamp it")
+	}
+}
+
+// The humidity route is its declaration exactly as wiring builds it — no
+// middleware stages — flushed on close.
+func TestRouteChainFlushesHumidity(t *testing.T) {
+	routes, repo, flush := routesFixture(t)
+
+	routes["humidity"](context.Background(), handlers.RawMessage{Topic: "humidity", Payload: []byte("48.2")})
+	routes["humidity"](context.Background(), handlers.RawMessage{Topic: "humidity", Payload: []byte("garbage")})
+	flush()
+
+	if len(repo.humRows) != 1 {
+		t.Fatalf("flushed humidity rows = %v, want only the valid reading", repo.humRows)
+	}
+	if repo.humRows[0].Value != 48.2 {
+		t.Errorf("flushed value = %v, want 48.2", repo.humRows[0].Value)
+	}
+}
+
+// The rainfall chain's limiter, proven at the route: a burst beyond the 1s
+// token budget persists exactly one reading — the wired default is 1/s with
+// burst 1, and drops at the limiter are silent by decision.
+func TestRouteChainRateLimitsBurst(t *testing.T) {
+	routes, repo, _ := routesFixture(t)
+
+	for _, payload := range []string{
+		`{"rainfall": 1}`, `{"rainfall": 2}`, `{"rainfall": 3}`,
+		`{"rainfall": 4}`, `{"rainfall": 5}`,
+	} {
+		routes["rainfall"](context.Background(), handlers.RawMessage{Topic: "rainfall", Payload: []byte(payload)})
+	}
+
+	if len(repo.created) != 1 {
+		t.Fatalf("burst persisted %v, want exactly one row (rate limit at 1/s, burst 1)", repo.created)
 	}
 }
